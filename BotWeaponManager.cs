@@ -16,7 +16,10 @@ public class BotWeaponManager : MonoBehaviour
     public MissilePylon[] missilePylons = new MissilePylon[3];
 
     [Header("Missile Prefabs (index == MissileType)")]
-    public GameObject[] missilePrefabs = new GameObject[3]; // IR, SARH, ARH
+    public GameObject[] missilePrefabs = new GameObject[3]; // IR, SARH, ARH (FIRING prefabs with scripts)
+
+    [Header("Missile Models (Visual Only)")]
+    public GameObject[] missileModelPrefabs = new GameObject[3]; // IR, SARH, ARH (MODEL prefabs for display)
 
     [Header("Firing Behavior")]
     [SerializeField] private bool autoFireEnabled = true;
@@ -263,16 +266,32 @@ public class BotWeaponManager : MonoBehaviour
 
         GameObject liveMissile = Instantiate(missilePrefabs[prefabIndex], spawnPosition, spawnRotation);
 
-        // Configure missile
-        AIM9Missile missileScript = liveMissile.GetComponent<AIM9Missile>();
-        if (missileScript != null)
+        // FIXED: Configure missile - try all three missile types
+        AIM9Missile aim9Script = liveMissile.GetComponent<AIM9Missile>();
+        AIM7Missile aim7Script = liveMissile.GetComponent<AIM7Missile>();
+        AIM120Missile aim120Script = liveMissile.GetComponent<AIM120Missile>();
+
+        if (aim9Script != null)
         {
-            missileScript.SetLauncher(gameObject);
-            missileScript.SetTarget(currentTarget);
+            aim9Script.SetLauncher(gameObject);
+            aim9Script.SetTarget(currentTarget);
+            if (showDebug) Debug.Log($"[BotWeapon] Configured AIM-9 missile");
+        }
+        else if (aim7Script != null)
+        {
+            aim7Script.SetLauncher(gameObject);
+            aim7Script.SetTarget(currentTarget);
+            if (showDebug) Debug.Log($"[BotWeapon] Configured AIM-7 missile");
+        }
+        else if (aim120Script != null)
+        {
+            aim120Script.SetLauncher(gameObject);
+            aim120Script.SetTarget(currentTarget);
+            if (showDebug) Debug.Log($"[BotWeapon] Configured AIM-120 missile");
         }
         else
         {
-            if (showDebug) Debug.LogWarning($"[BotWeapon] Missile prefab missing AIM9Missile component");
+            if (showDebug) Debug.LogWarning($"[BotWeapon] Missile prefab missing recognized missile script (AIM9/AIM7/AIM120)");
         }
 
         // Ignore collision with launcher

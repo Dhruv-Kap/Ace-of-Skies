@@ -28,7 +28,10 @@ public class WeaponManager : MonoBehaviour
     public AimAssist aimAssist; // Reference to AimAssist for gun crosshair control
 
     [Header("Missile Prefabs")]
-    public GameObject[] missilePrefabs = new GameObject[3]; // IR, Semi-Radar, Active-Radar
+    public GameObject[] missilePrefabs = new GameObject[3]; // IR, Semi-Radar, Active-Radar (FIRING prefabs)
+
+    [Header("Missile Models (Visual Only)")]
+    public GameObject[] missileModelPrefabs = new GameObject[3]; // IR, Semi-Radar, Active-Radar (MODEL prefabs for display)
 
     // Current weapon state
     private WeaponType currentWeapon = WeaponType.Gun;
@@ -36,6 +39,9 @@ public class WeaponManager : MonoBehaviour
 
     // UI auto-hide
     private Coroutine uiHideCoroutine;
+
+    // Reload system reference
+    private AmmoReloadSystem reloadSystem;
 
     // Weapon types
     public enum WeaponType
@@ -48,6 +54,11 @@ public class WeaponManager : MonoBehaviour
 
     void Start()
     {
+        // Find reload system
+        reloadSystem = GetComponent<AmmoReloadSystem>();
+        if (reloadSystem == null)
+            reloadSystem = GetComponentInChildren<AmmoReloadSystem>();
+
         // Initialize weapon selection
         SwitchToWeapon(WeaponType.Gun);
         UpdateUI();
@@ -127,6 +138,13 @@ public class WeaponManager : MonoBehaviour
 
     void ActivateGun()
     {
+        // Check if gun is reloading
+        if (reloadSystem != null && reloadSystem.IsGunReloading())
+        {
+            Debug.Log("[WeaponManager] Cannot use gun - currently reloading!");
+            return;
+        }
+
         if (gunScript != null)
             gunScript.enabled = true;
 
@@ -139,6 +157,13 @@ public class WeaponManager : MonoBehaviour
     {
         if (pylonIndex >= 0 && pylonIndex < missilePylons.Length)
         {
+            // Check if this pylon is reloading
+            if (reloadSystem != null && reloadSystem.IsPylonReloading(pylonIndex))
+            {
+                Debug.Log($"[WeaponManager] Cannot use pylon {pylonIndex + 1} - currently reloading!");
+                return;
+            }
+
             MissilePylon pylon = missilePylons[pylonIndex];
             if (pylon != null && pylon.HasMissiles())
             {
@@ -174,6 +199,20 @@ public class WeaponManager : MonoBehaviour
 
     void FireMissile(int pylonIndex)
     {
+        // Check if this pylon is reloading
+        if (reloadSystem != null && reloadSystem.IsPylonReloading(pylonIndex))
+        {
+            Debug.Log($"[WeaponManager] Cannot fire pylon {pylonIndex + 1} - currently reloading!");
+            return;
+        }
+
+        // CHECK FOR LOCKED TARGET BEFORE FIRING
+        if (aimAssist == null || !aimAssist.HasLockedTarget())
+        {
+            Debug.Log("[WeaponManager] Cannot fire missile - No locked target!");
+            return;
+        }
+
         if (pylonIndex >= 0 && pylonIndex < missilePylons.Length)
         {
             MissilePylon pylon = missilePylons[pylonIndex];
@@ -191,7 +230,7 @@ public class WeaponManager : MonoBehaviour
                     Vector3 spawnPosition = missileTransform.position;
                     Quaternion spawnRotation = missileTransform.rotation;
 
-                    Debug.Log($"[WeaponManager] Firing missile from position: {spawnPosition}"); // ADD THIS
+                    Debug.Log($"[WeaponManager] Firing missile from position: {spawnPosition}");
 
                     Destroy(missileTransform.gameObject);
 
@@ -200,39 +239,49 @@ public class WeaponManager : MonoBehaviour
                         int prefabIndex = (int)pylon.missileType;
                         if (prefabIndex >= 0 && prefabIndex < missilePrefabs.Length && missilePrefabs[prefabIndex] != null)
                         {
-                            Debug.Log($"[WeaponManager] Instantiating missile prefab: {missilePrefabs[prefabIndex].name}"); // ADD THIS
+                            Debug.Log($"[WeaponManager] Instantiating missile prefab: {missilePrefabs[prefabIndex].name}");
 
                             GameObject newMissile = Instantiate(missilePrefabs[prefabIndex], spawnPosition, spawnRotation);
 
-                            Debug.Log($"[WeaponManager] Missile instantiated: {newMissile.name} at {newMissile.transform.position}"); // ADD THIS
+                            Debug.Log($"[WeaponManager] Missile instantiated: {newMissile.name} at {newMissile.transform.position}");
 
-                            AIM9Missile missileController = newMissile.GetComponent<AIM9Missile>();
-                            if (missileController != null)
+                            // Try to find AIM9, AIM7, or AIM120 missile component
+                            AIM9Missile aim9Controller = newMissile.GetComponent<AIM9Missile>();
+                            AIM7Missile aim7Controller = newMissile.GetComponent<AIM7Missile>();
+                            AIM120Missile aim120Controller = newMissile.GetComponent<AIM120Missile>();
+
+                            if (aim9Controller != null)
                             {
-                                missileController.SetLauncher(gameObject);
-
-                                if (aimAssist != null && aimAssist.HasLockedTarget())
-                                {
-                                    missileController.SetTarget(aimAssist.GetLockedTarget());
-                                    Debug.Log($"[WeaponManager] Target set to: {aimAssist.GetLockedTarget().name}"); // ADD THIS
-                                }
-                                else
-                                {
-                                    Debug.LogWarning("[WeaponManager] No locked target found!"); // ADD THIS
-                                }
+                                aim9Controller.SetLauncher(gameObject);
+                                aim9Controller.SetTarget(aimAssist.GetLockedTarget());
+                                Debug.Log($"[WeaponManager] AIM-9 Target set to: {aimAssist.GetLockedTarget().name}");
+                            }
+                            else if (aim7Controller != null)
+                            {
+                                aim7Controller.SetLauncher(gameObject);
+                                aim7Controller.SetTarget(aimAssist.GetLockedTarget());
+                                Debug.Log($"[WeaponManager] AIM-7 Target set to: {aimAssist.GetLockedTarget().name}");
+                            }
+                            else if (aim120Controller != null)
+                            {
+                                aim120Controller.SetLauncher(gameObject);
+                                aim120Controller.SetTarget(aimAssist.GetLockedTarget());
+                                Debug.Log($"[WeaponManager] AIM-120 Target set to: {aimAssist.GetLockedTarget().name}");
                             }
                             else
                             {
-                                Debug.LogError("[WeaponManager] AIM9Missile script not found on prefab!"); // ADD THIS
+                                Debug.LogError("[WeaponManager] No recognized missile script found on prefab!");
                             }
                         }
                         else
                         {
-                            Debug.LogError($"[WeaponManager] Missile prefab not assigned or invalid index: {prefabIndex}"); // ADD THIS
+                            Debug.LogError($"[WeaponManager] Missile prefab not assigned or invalid index: {prefabIndex}");
                         }
                     }
 
                     pylon.FireMissile();
+
+                    // Update UI immediately after firing
                     UpdateUI();
 
                     if (!pylon.HasMissiles())
@@ -242,7 +291,7 @@ public class WeaponManager : MonoBehaviour
                 }
                 else
                 {
-                    Debug.LogError("[WeaponManager] No missile transform found to fire!"); // ADD THIS
+                    Debug.LogError("[WeaponManager] No missile transform found to fire!");
                 }
             }
         }
@@ -260,7 +309,16 @@ public class WeaponManager : MonoBehaviour
         {
             case WeaponType.Gun:
                 weaponName = "Aircraft Gun";
-                ammoCount = "Ready"; // Gun ammo is handled by F16GunFire script
+
+                // Show reloading status
+                if (reloadSystem != null && reloadSystem.IsGunReloading())
+                {
+                    ammoCount = "RELOADING...";
+                }
+                else
+                {
+                    ammoCount = "Ready";
+                }
                 targetingType = "Manual";
                 break;
             case WeaponType.MissilePylon1:
@@ -270,7 +328,17 @@ public class WeaponManager : MonoBehaviour
                 if (pylon != null)
                 {
                     weaponName = GetMissileName(pylon.missileType);
-                    ammoCount = pylon.GetTotalMissiles().ToString();
+
+                    // FIXED: Check the CORRECT pylon index for reload status
+                    // currentMissilePylon corresponds to the selected pylon (0, 1, or 2)
+                    if (reloadSystem != null && reloadSystem.IsPylonReloading(currentMissilePylon))
+                    {
+                        ammoCount = "RELOADING...";
+                    }
+                    else
+                    {
+                        ammoCount = pylon.GetTotalMissiles().ToString();
+                    }
                     targetingType = GetTargetingTypeName(pylon.missileType);
                 }
                 break;
@@ -281,13 +349,13 @@ public class WeaponManager : MonoBehaviour
         if (targetingTypeText) targetingTypeText.text = targetingType;
     }
 
+
     void UpdateWeaponSelectionIndicator()
     {
         for (int i = 0; i < weaponSelectionButtons.Length; i++)
         {
             if (weaponSelectionButtons[i] != null)
             {
-                // Highlight current weapon selection
                 weaponSelectionButtons[i].GetComponent<Image>().color =
                     (i == (int)currentWeapon) ? Color.yellow : Color.white;
             }
@@ -298,9 +366,9 @@ public class WeaponManager : MonoBehaviour
     {
         switch (type)
         {
-            case MissileType.Infrared: return "IR Missile";
+            case MissileType.Infrared: return "AIM-9 Sidewinder";
             case MissileType.SemiActiveRadar: return "Semi-Active Radar";
-            case MissileType.ActiveRadar: return "Active Radar";
+            case MissileType.ActiveRadar: return "AIM-120 AMRAAM";
             default: return "Unknown";
         }
     }
@@ -318,16 +386,12 @@ public class WeaponManager : MonoBehaviour
 
     void StartUIAutoHide()
     {
-        // Stop any existing coroutine
         if (uiHideCoroutine != null)
         {
             StopCoroutine(uiHideCoroutine);
         }
 
-        // Show UI elements
         SetUIVisible(true);
-
-        // Start new hide timer
         uiHideCoroutine = StartCoroutine(HideUIAfterDelay(2f));
     }
 
@@ -341,20 +405,25 @@ public class WeaponManager : MonoBehaviour
     void SetUIVisible(bool visible)
     {
         if (weaponNameText) weaponNameText.gameObject.SetActive(visible);
-        if (ammoCountText) ammoCountText.gameObject.SetActive(visible);
+        if (ammoCountText) ammoCountText.gameObject.SetActive(true);
         if (targetingTypeText) targetingTypeText.gameObject.SetActive(visible);
     }
 
-    // Public methods for external access
     public bool CanFireCurrentWeapon()
     {
         switch (currentWeapon)
         {
             case WeaponType.Gun:
-                return true; // Gun availability is handled by F16GunFire script
+                // Check if gun is reloading
+                if (reloadSystem != null && reloadSystem.IsGunReloading())
+                    return false;
+                return true;
             case WeaponType.MissilePylon1:
             case WeaponType.MissilePylon2:
             case WeaponType.MissilePylon3:
+                // Check if pylon is reloading
+                if (reloadSystem != null && reloadSystem.IsPylonReloading(currentMissilePylon))
+                    return false;
                 return missilePylons[currentMissilePylon] != null &&
                        missilePylons[currentMissilePylon].HasMissiles();
             default:
@@ -368,21 +437,20 @@ public class WeaponManager : MonoBehaviour
     }
 }
 
-// Missile Pylon Class
 [System.Serializable]
 public class MissilePylon
 {
     [Header("Pylon Configuration")]
     public string pylonName;
     public MissileType missileType;
-    public Transform leftPylon;  // The main pylon (e.g., MissilePylon1)
-    public Transform rightPylon; // The paired pylon (e.g., MissilePylon1 (1))
+    public Transform leftPylon;
+    public Transform rightPylon;
 
     [Header("Cooldown")]
     public float cooldownTime = 5f;
 
-    private bool fireFromLeft = true; // Alternating fire pattern
-    private float lastFireTime = -999f; // Track last fire time
+    private bool fireFromLeft = true;
+    private float lastFireTime = -999f;
 
     public bool HasMissiles()
     {
@@ -413,7 +481,6 @@ public class MissilePylon
     {
         Transform targetPylon = fireFromLeft ? leftPylon : rightPylon;
 
-        // If target pylon is empty or null, try the other one
         if (targetPylon == null || targetPylon.childCount == 0)
         {
             targetPylon = fireFromLeft ? rightPylon : leftPylon;
@@ -421,7 +488,7 @@ public class MissilePylon
 
         if (targetPylon != null && targetPylon.childCount > 0)
         {
-            return targetPylon.GetChild(0); // Get first child (missile)
+            return targetPylon.GetChild(0);
         }
 
         return null;
@@ -429,15 +496,11 @@ public class MissilePylon
 
     public void FireMissile()
     {
-        // Record fire time for cooldown
         lastFireTime = Time.time;
-
-        // Alternate between pylons for next shot
         fireFromLeft = !fireFromLeft;
     }
 }
 
-// Missile Types
 public enum MissileType
 {
     Infrared,

@@ -1,39 +1,61 @@
 using UnityEngine;
 using UnityEngine.UI;
+using System.Collections;
 
 public class AimAssist : MonoBehaviour
 {
     [Header("Detection Settings")]
-    [SerializeField] private float detectionRange = 650f;
-    [SerializeField] private float detectionInterval = 0.2f;
-    [SerializeField] private float detectionAngle = 60f;
+    [SerializeField] float detectionRange = 650f;
+    [SerializeField] float detectionInterval = 0.2f;
+    [SerializeField] float detectionAngle = 60f;
 
     [Header("Crosshair Settings")]
-    [SerializeField] private RectTransform crosshairParent;
-    [SerializeField] private float crosshairSpeed = 5f;
-    [SerializeField] private GameObject gunCrosshair; // The gun crosshair GameObject
+    [SerializeField] RectTransform crosshairParent;
+    [SerializeField] float crosshairSpeed = 5f;
+    [SerializeField] GameObject gunCrosshair;
 
     [Header("IR Missile Settings")]
-    [SerializeField] private float irDetectionRange = 1300f;
-    [SerializeField] private float irLockOnTime = 2f;
-    [SerializeField] private Image infraredFillImage; // The "infrared" Image component
-    [SerializeField] private Color normalColor = Color.white;
-    [SerializeField] private Color lockedColor = Color.red;
+    [SerializeField] float irDetectionRange = 1300f;
+    [SerializeField] float irLockOnTime = 2f;
+    [SerializeField] Image infraredFillImage;
+    [SerializeField] Color irNormalColor = Color.white;
+    [SerializeField] Color irLockedColor = Color.red;
+
+    [Header("SARH Missile Settings")]
+    [SerializeField] float sarhDetectionRange = 2000f;
+    [SerializeField] float sarhLockOnTime = 3f;
+    [SerializeField] Image sarhFillImage;
+    [SerializeField] Color sarhNormalColor = Color.cyan;
+    [SerializeField] Color sarhLockedColor = Color.green;
+
+    [Header("ARH Missile Settings")]
+    [SerializeField] float arhDetectionRange = 2500f;
+    [SerializeField] float arhLockOnTime = 4f;
+    [SerializeField] Image arhFillImage;
+    [SerializeField] Color arhNormalColor = Color.blue;
+    [SerializeField] Color arhLockedColor = Color.magenta;
 
     [Header("References")]
-    [SerializeField] private WeaponManager weaponManager;
+    [SerializeField] public WeaponManager weaponManager;
 
-    private GameObject currentTarget;
-    private Camera playerCamera;
-    private Vector2 screenCenter;
+    GameObject currentTarget;
+    Camera playerCamera;
+    Vector2 screenCenter;
 
-    // IR missile lock-on variables
-    private float irLockProgress = 0f;
-    private bool isIRLocking = false;
-    private bool isIRLocked = false;
+    float lockProgress;
+    bool isLocking;
+    bool isLocked;
+    MissileType? currentMissileType;
 
     void Start()
     {
+        Reinitialize();
+    }
+
+    // Call this on respawn to reset ALL references and coroutines!
+    public void Reinitialize(WeaponManager wm = null)
+    {
+        if (wm != null) weaponManager = wm;
         playerCamera = Camera.main;
         if (playerCamera == null)
             playerCamera = Object.FindFirstObjectByType<Camera>();
@@ -45,26 +67,24 @@ public class AimAssist : MonoBehaviour
                 crosshairParent = crosshairGO.GetComponent<RectTransform>();
         }
 
-        if (weaponManager == null)
-            weaponManager = Object.FindFirstObjectByType<WeaponManager>();
-
         screenCenter = new Vector2(Screen.width / 2f, Screen.height / 2f);
+
+        ResetLock();
+
+        StopAllCoroutines();
         StartCoroutine(DetectEnemiesCoroutine());
     }
 
     void Update()
     {
-        if (Input.GetKeyDown(KeyCode.R))
-        {
-            SwitchToNextTarget();
-        }
+        if (Input.GetKeyDown(KeyCode.R)) SwitchToNextTarget();
 
         ValidateCurrentTarget();
         UpdateCrosshairPosition();
-        UpdateIRMissileLockOn();
+        UpdateMissileLockOn();
     }
 
-    System.Collections.IEnumerator DetectEnemiesCoroutine()
+    IEnumerator DetectEnemiesCoroutine()
     {
         while (true)
         {
@@ -76,9 +96,7 @@ public class AimAssist : MonoBehaviour
     void CheckForEnemies()
     {
         if (currentTarget != null) return;
-
         GameObject[] allEnemies = GameObject.FindGameObjectsWithTag("Enemy");
-
         foreach (GameObject enemy in allEnemies)
         {
             if (enemy != null)
@@ -86,9 +104,7 @@ public class AimAssist : MonoBehaviour
                 Vector3 directionToEnemy = (enemy.transform.position - transform.position).normalized;
                 float distance = Vector3.Distance(transform.position, enemy.transform.position);
                 float angle = Vector3.Angle(transform.forward, directionToEnemy);
-
                 float currentDetectionRange = GetCurrentDetectionRange();
-
                 if (distance <= currentDetectionRange && angle <= detectionAngle)
                 {
                     LockOntoTarget(enemy);
@@ -101,7 +117,6 @@ public class AimAssist : MonoBehaviour
     void CheckForEnemiesExcluding(GameObject excludeEnemy)
     {
         GameObject[] allEnemies = GameObject.FindGameObjectsWithTag("Enemy");
-
         foreach (GameObject enemy in allEnemies)
         {
             if (enemy != null && enemy != excludeEnemy)
@@ -109,9 +124,7 @@ public class AimAssist : MonoBehaviour
                 Vector3 directionToEnemy = (enemy.transform.position - transform.position).normalized;
                 float distance = Vector3.Distance(transform.position, enemy.transform.position);
                 float angle = Vector3.Angle(transform.forward, directionToEnemy);
-
                 float currentDetectionRange = GetCurrentDetectionRange();
-
                 if (distance <= currentDetectionRange && angle <= detectionAngle)
                 {
                     LockOntoTarget(enemy);
@@ -123,30 +136,27 @@ public class AimAssist : MonoBehaviour
 
     float GetCurrentDetectionRange()
     {
-        if (IsCurrentlyIRMissile())
+        MissileType? missileType = GetCurrentMissileType();
+        if (!missileType.HasValue) return detectionRange;
+
+        switch (missileType.Value)
         {
-            return irDetectionRange;
+            case MissileType.Infrared: return irDetectionRange;
+            case MissileType.SemiActiveRadar: return sarhDetectionRange;
+            case MissileType.ActiveRadar: return arhDetectionRange;
+            default: return detectionRange;
         }
-        return detectionRange;
     }
 
-    bool IsCurrentlyIRMissile()
+    MissileType? GetCurrentMissileType()
     {
-        if (weaponManager == null) return false;
-
+        if (weaponManager == null) return null;
         WeaponManager.WeaponType currentWeapon = weaponManager.GetCurrentWeapon();
-
-        // If it's the gun, it's not IR missile
-        if (currentWeapon == WeaponManager.WeaponType.Gun) return false;
-
-        // For missile pylons, check if the pylon has IR missiles
+        if (currentWeapon == WeaponManager.WeaponType.Gun) return null;
         int pylonIndex = GetPylonIndexFromWeapon(currentWeapon);
         if (pylonIndex >= 0 && pylonIndex < weaponManager.missilePylons.Length)
-        {
-            return weaponManager.missilePylons[pylonIndex].missileType == MissileType.Infrared;
-        }
-
-        return false;
+            return weaponManager.missilePylons[pylonIndex].missileType;
+        return null;
     }
 
     int GetPylonIndexFromWeapon(WeaponManager.WeaponType weapon)
@@ -163,178 +173,135 @@ public class AimAssist : MonoBehaviour
     void LockOntoTarget(GameObject target)
     {
         currentTarget = target;
-        Debug.Log($"Locked onto target: {target.name}");
-
-        // Reset IR lock progress when getting new target
-        ResetIRLock();
+        currentMissileType = GetCurrentMissileType();
+        ResetLock();
     }
 
     void ValidateCurrentTarget()
     {
         if (currentTarget == null) return;
-
         Vector3 directionToTarget = (currentTarget.transform.position - transform.position).normalized;
         float distance = Vector3.Distance(transform.position, currentTarget.transform.position);
         float angle = Vector3.Angle(transform.forward, directionToTarget);
 
         float currentDetectionRange = GetCurrentDetectionRange();
-
         if (distance > currentDetectionRange || angle > detectionAngle)
         {
-            Debug.Log($"Lost target: {currentTarget.name} - out of range/angle");
             currentTarget = null;
-            ResetIRLock();
+            ResetLock();
         }
     }
 
     void SwitchToNextTarget()
     {
         GameObject previousTarget = currentTarget;
-
-        if (currentTarget != null)
-        {
-            Debug.Log($"Switching from target: {currentTarget.name}");
-        }
-
         currentTarget = null;
-        ResetIRLock();
+        ResetLock();
         CheckForEnemiesExcluding(previousTarget);
-
-        if (currentTarget == null)
-        {
-            Debug.Log("No other targets available");
-        }
     }
 
     void UpdateCrosshairPosition()
     {
         if (crosshairParent == null) return;
-
-        Vector2 targetScreenPos;
-
-        if (currentTarget != null)
+        Vector2 targetScreenPos = screenCenter;
+        if (currentTarget != null && playerCamera != null)
         {
             Vector3 worldPos = currentTarget.transform.position;
             Vector3 screenPos = playerCamera.WorldToScreenPoint(worldPos);
             targetScreenPos = new Vector2(screenPos.x, screenPos.y);
         }
-        else
-        {
-            targetScreenPos = screenCenter;
-        }
-
         Vector2 currentPos = crosshairParent.position;
         Vector2 newPos = Vector2.Lerp(currentPos, targetScreenPos, crosshairSpeed * Time.deltaTime);
         crosshairParent.position = newPos;
     }
 
-    void UpdateIRMissileLockOn()
+    void UpdateMissileLockOn()
     {
-        bool shouldShowIRLock = IsCurrentlyIRMissile() && currentTarget != null;
+        MissileType? missileType = GetCurrentMissileType();
+        bool shouldShowLock = missileType.HasValue && currentTarget != null;
 
-        if (shouldShowIRLock)
+        if (shouldShowLock)
         {
-            // Start/continue IR lock process
-            if (!isIRLocking)
+            if (!isLocking || currentMissileType != missileType)
             {
-                isIRLocking = true;
-                irLockProgress = 0f;
-                isIRLocked = false;
+                isLocking = true;
+                lockProgress = 0f;
+                isLocked = false;
+                currentMissileType = missileType;
             }
 
-            // Update lock progress
-            irLockProgress += Time.deltaTime / irLockOnTime;
-            irLockProgress = Mathf.Clamp01(irLockProgress);
+            float lockTime = GetLockOnTime(missileType.Value);
+            lockProgress += Time.deltaTime / lockTime;
+            lockProgress = Mathf.Clamp01(lockProgress);
 
-            // Check if fully locked
-            if (irLockProgress >= 1f && !isIRLocked)
-            {
-                isIRLocked = true;
-                Debug.Log("IR Missile LOCKED ON!");
-            }
+            if (lockProgress >= 1f && !isLocked)
+                isLocked = true;
 
-            UpdateIRCrosshairVisuals();
+            UpdateCrosshairVisuals(missileType.Value);
         }
         else
         {
-            // Reset when not using IR or no target
-            ResetIRLock();
-            HideIRCrosshairVisuals();
+            ResetLock();
+            HideAllCrosshairVisuals();
         }
     }
 
-    void UpdateIRCrosshairVisuals()
+    float GetLockOnTime(MissileType missileType)
     {
-        if (infraredFillImage != null)
+        switch (missileType)
         {
-            // Show the fill image
-            if (!infraredFillImage.gameObject.activeInHierarchy)
-                infraredFillImage.gameObject.SetActive(true);
-
-            // Update fill amount
-            infraredFillImage.fillAmount = irLockProgress;
-
-            // Update color based on lock status
-            infraredFillImage.color = isIRLocked ? lockedColor : normalColor;
+            case MissileType.Infrared: return irLockOnTime;
+            case MissileType.SemiActiveRadar: return sarhLockOnTime;
+            case MissileType.ActiveRadar: return arhLockOnTime;
+            default: return 2f;
         }
     }
 
-    void HideIRCrosshairVisuals()
+    void UpdateCrosshairVisuals(MissileType missileType)
     {
-        if (infraredFillImage != null && infraredFillImage.gameObject.activeInHierarchy)
+        HideAllCrosshairVisuals();
+        Image targetImage = null;
+        Color normalColor = Color.white;
+        Color lockedColor = Color.red;
+
+        switch (missileType)
         {
-            infraredFillImage.gameObject.SetActive(false);
+            case MissileType.Infrared: targetImage = infraredFillImage; normalColor = irNormalColor; lockedColor = irLockedColor; break;
+            case MissileType.SemiActiveRadar: targetImage = sarhFillImage; normalColor = sarhNormalColor; lockedColor = sarhLockedColor; break;
+            case MissileType.ActiveRadar: targetImage = arhFillImage; normalColor = arhNormalColor; lockedColor = arhLockedColor; break;
         }
-    }
-
-    void ResetIRLock()
-    {
-        isIRLocking = false;
-        isIRLocked = false;
-        irLockProgress = 0f;
-    }
-
-    void OnDrawGizmosSelected()
-    {
-        // Draw current detection range based on weapon
-        float currentRange = GetCurrentDetectionRange();
-        Gizmos.color = IsCurrentlyIRMissile() ? Color.red : Color.yellow;
-        Gizmos.DrawWireSphere(transform.position, currentRange);
-
-        if (currentTarget != null)
+        if (targetImage != null)
         {
-            Gizmos.color = isIRLocked ? Color.red : Color.yellow;
-            Gizmos.DrawLine(transform.position, currentTarget.transform.position);
+            targetImage.gameObject.SetActive(true);
+            targetImage.fillAmount = lockProgress;
+            targetImage.color = isLocked ? lockedColor : normalColor;
         }
     }
 
-    // Public methods for external access
-    public bool HasLockedTarget()
+    void HideAllCrosshairVisuals()
     {
-        return currentTarget != null;
+        if (infraredFillImage != null) infraredFillImage.gameObject.SetActive(false);
+        if (sarhFillImage != null) sarhFillImage.gameObject.SetActive(false);
+        if (arhFillImage != null) arhFillImage.gameObject.SetActive(false);
     }
 
-    public GameObject GetLockedTarget()
+    void ResetLock()
     {
-        return currentTarget;
+        isLocking = false;
+        isLocked = false;
+        lockProgress = 0f;
+        currentMissileType = null;
     }
 
-    public bool IsIRMissileLocked()
-    {
-        return isIRLocked;
-    }
-
-    public float GetIRLockProgress()
-    {
-        return irLockProgress;
-    }
-
-    // Method for WeaponManager to control gun crosshair visibility
+    // Public status methods
+    public bool HasLockedTarget() => currentTarget != null;
+    public GameObject GetLockedTarget() => currentTarget;
+    public bool IsMissileLocked() => isLocked;
+    public float GetLockProgress() => lockProgress;
+    public MissileType? GetCurrentLockedMissileType() => currentMissileType;
     public void SetGunCrosshairVisible(bool visible)
     {
         if (gunCrosshair != null)
-        {
             gunCrosshair.SetActive(visible);
-        }
     }
 }

@@ -1,17 +1,22 @@
 using UnityEngine;
 
-public class AIM9Missile : MonoBehaviour
+public class AIM7Missile : MonoBehaviour
 {
-    [Header("AIM-9 Specifications")]
-    [SerializeField] private float speed = 566f;
-    [SerializeField] private float lifetime = 15f;
-    [SerializeField] private float damage = 25f;
-    [SerializeField] private float explosionRadius = 6f;
+    [Header("AIM-7 Sparrow Specifications")]
+    [SerializeField] private float speed = 850f; // Between AIM-9 and AIM-120
+    [SerializeField] private float lifetime = 25f; // Medium range
+    [SerializeField] private float damage = 45f; // Between AIM-9 and AIM-120
+    [SerializeField] private float explosionRadius = 8f; // Medium blast radius
 
     [Header("Guidance System")]
-    [SerializeField] private float lockOnDelay = 2f;
-    [SerializeField] private float seekerConeAngle = 30f;
-    [SerializeField] private float totalTurnBudget = 720f;
+    [SerializeField] private float lockOnDelay = 2.5f;
+    [SerializeField] private float seekerConeAngle = 35f;
+    [SerializeField] private float totalTurnBudget = 600f; // Between AIM-9 and AIM-120
+    [SerializeField] private float maxTurnRatePerSecond = 20f; // Medium agility
+
+    [Header("Semi-Active Radar")]
+    [SerializeField] private float radarIlluminationConeAngle = 30f; // Plane must keep pointing at target
+    [SerializeField] private float illuminationCheckInterval = 0.2f; // How often to check if plane is illuminating
 
     [Header("Effects")]
     [SerializeField] private GameObject explosionEffect;
@@ -30,18 +35,10 @@ public class AIM9Missile : MonoBehaviour
     private bool isTracking = false;
     private float turnBudgetRemaining;
     private GameObject launcher;
-    private bool hasTriggeredPlayerWarning = false;
+    private bool isPlaneIlluminating = false;
 
     void Start()
     {
-        // CRITICAL CHECK: If no target, destroy missile immediately
-        if (target == null)
-        {
-            Debug.LogError("[AIM-9] Missile spawned without target! Destroying immediately.");
-            Destroy(gameObject);
-            return;
-        }
-
         rb = GetComponent<Rigidbody>();
         launchTime = Time.time;
         turnBudgetRemaining = totalTurnBudget;
@@ -55,7 +52,7 @@ public class AIM9Missile : MonoBehaviour
             rb.linearVelocity = transform.forward * speed;
         }
 
-        // Ignore collisions with launcher
+        // Reduce immediate collisions with the launcher
         if (launcher != null)
         {
             Collider missileCollider = GetComponent<Collider>();
@@ -72,11 +69,29 @@ public class AIM9Missile : MonoBehaviour
             audioSource.PlayOneShot(launchSound);
         }
 
-        if (showDebug)
-            Debug.Log($"[AIM-9] Missile launched with target: {target.name}");
+        // Try to acquire target from AimAssist
+        if (target == null)
+        {
+            AimAssist aimAssist = FindFirstObjectByType<AimAssist>();
+            if (aimAssist != null && aimAssist.HasLockedTarget())
+            {
+                target = aimAssist.GetLockedTarget();
+                if (showDebug)
+                    Debug.Log($"[AIM-7] Missile acquired target: {target.name}");
+            }
+            else if (showDebug)
+            {
+                Debug.Log("[AIM-7] Missile fired without target - going ballistic");
+            }
+        }
+        else if (showDebug && target != null)
+        {
+            Debug.Log($"[AIM-7] Target set directly: {target.name}");
+        }
 
         Destroy(gameObject, lifetime);
         Invoke(nameof(ActivateTracking), lockOnDelay);
+        StartCoroutine(CheckRadarIlluminationCoroutine());
     }
 
     void ActivateTracking()
@@ -84,16 +99,58 @@ public class AIM9Missile : MonoBehaviour
         if (target != null)
         {
             isLocked = true;
-            isTracking = true;
-
             if (showDebug)
-                Debug.Log("[AIM-9] Lock-on complete - tracking active");
+                Debug.Log("[AIM-7] Semi-active radar lock-on complete");
+        }
+    }
 
-            // Check if tracking the player and trigger warning
-            if (IsTargetingPlayer() && !hasTriggeredPlayerWarning)
+    System.Collections.IEnumerator CheckRadarIlluminationCoroutine()
+    {
+        while (true)
+        {
+            yield return new WaitForSeconds(illuminationCheckInterval);
+            CheckPlaneIllumination();
+        }
+    }
+
+    void CheckPlaneIllumination()
+    {
+        if (launcher == null || target == null)
+        {
+            isPlaneIlluminating = false;
+            return;
+        }
+
+        // Check if launcher is pointing at target
+        Vector3 launcherToTarget = (target.transform.position - launcher.transform.position).normalized;
+        float angle = Vector3.Angle(launcher.transform.forward, launcherToTarget);
+
+        bool wasIlluminating = isPlaneIlluminating;
+        isPlaneIlluminating = angle <= radarIlluminationConeAngle;
+
+        // Debug status changes
+        if (showDebug && wasIlluminating != isPlaneIlluminating)
+        {
+            if (isPlaneIlluminating)
+                Debug.Log("[AIM-7] Radar illumination ACQUIRED - missile can track");
+            else
+                Debug.Log("[AIM-7] Radar illumination LOST - missile going ballistic");
+        }
+
+        // Update tracking status based on illumination
+        if (isLocked)
+        {
+            if (isPlaneIlluminating && !isTracking)
             {
-                TriggerPlayerMissileWarning();
-                hasTriggeredPlayerWarning = true;
+                // Reacquiring target - costs turn budget naturally through GuideToTarget
+                isTracking = true;
+                if (showDebug)
+                    Debug.Log("[AIM-7] Reacquiring target");
+            }
+            else if (!isPlaneIlluminating && isTracking)
+            {
+                // Lost illumination - go ballistic
+                isTracking = false;
             }
         }
     }
@@ -105,16 +162,18 @@ public class AIM9Missile : MonoBehaviour
         // Debug missile movement
         if (showDebug && Time.frameCount % 30 == 0)
         {
-            Debug.Log($"[AIM-9] Pos: {transform.position}, Vel: {rb.linearVelocity.magnitude:F1} m/s, Target: {(target != null ? target.name : "NULL")}, Tracking: {isTracking}");
+            string status = isTracking ? "TRACKING" : "BALLISTIC";
+            string illumination = isPlaneIlluminating ? "ILLUMINATED" : "NO ILLUMINATION";
+            Debug.Log($"[AIM-7] Status: {status}, {illumination}, Vel: {rb.linearVelocity.magnitude:F1} m/s, Target: {(target != null ? target.name : "NULL")}");
             if (target != null)
             {
                 float dist = Vector3.Distance(transform.position, target.transform.position);
-                Debug.Log($"[AIM-9] Distance to target: {dist:F1}m");
+                Debug.Log($"[AIM-7] Distance to target: {dist:F1}m, Turn budget: {turnBudgetRemaining:F1}°");
             }
         }
 
-        // Track target or go ballistic
-        if (isTracking && target != null && turnBudgetRemaining > 0)
+        // Track target only if plane is illuminating and we have turn budget
+        if (isTracking && target != null && isPlaneIlluminating && turnBudgetRemaining > 0)
         {
             GuideToTarget();
         }
@@ -123,6 +182,7 @@ public class AIM9Missile : MonoBehaviour
             rb.linearVelocity = transform.forward * speed;
         }
 
+        // Maintain speed
         if (rb.linearVelocity.magnitude < speed * 0.9f)
             rb.linearVelocity = rb.linearVelocity.normalized * speed;
 
@@ -144,41 +204,48 @@ public class AIM9Missile : MonoBehaviour
         Vector3 directionToTarget = (target.transform.position - transform.position).normalized;
         float angleToTarget = Vector3.Angle(transform.forward, directionToTarget);
 
+        // Check if target is within seeker cone
         if (angleToTarget > seekerConeAngle)
         {
             isTracking = false;
             if (showDebug)
             {
-                Debug.Log($"[AIM-9] Target left seeker cone ({angleToTarget:F1}° > {seekerConeAngle}°) - going ballistic");
+                Debug.Log($"[AIM-7] Target left seeker cone ({angleToTarget:F1}° > {seekerConeAngle}°) - going ballistic");
             }
             return;
         }
 
-        Vector3 newDirection = Vector3.RotateTowards(
-            transform.forward,
-            directionToTarget,
-            Mathf.Deg2Rad * angleToTarget,
-            0f
-        );
-        float turnThisFrame = Vector3.Angle(transform.forward, newDirection);
+        // Calculate maximum turn this frame based on turn rate limit
+        float maxTurnThisFrame = maxTurnRatePerSecond * Time.fixedDeltaTime;
+        float desiredTurn = Mathf.Min(angleToTarget, maxTurnThisFrame);
 
-        if (turnThisFrame > turnBudgetRemaining)
+        // Check turn budget
+        if (desiredTurn > turnBudgetRemaining)
         {
             isTracking = false;
             if (showDebug)
             {
-                Debug.Log("[AIM-9] Turn budget exhausted - going ballistic");
+                Debug.Log("[AIM-7] Turn budget exhausted - going ballistic");
             }
             return;
         }
 
-        turnBudgetRemaining -= turnThisFrame;
+        // Apply turn
+        Vector3 newDirection = Vector3.RotateTowards(
+            transform.forward,
+            directionToTarget,
+            Mathf.Deg2Rad * desiredTurn,
+            0f
+        );
+
+        turnBudgetRemaining -= desiredTurn;
         transform.rotation = Quaternion.LookRotation(newDirection);
         rb.linearVelocity = transform.forward * speed;
     }
 
     void OnTriggerEnter(Collider other)
     {
+        // Ignore launcher
         if (launcher != null && other.GetComponentInParent<Transform>().root == launcher.transform.root)
             return;
 
@@ -188,7 +255,7 @@ public class AIM9Missile : MonoBehaviour
     void Explode(GameObject hitObject = null, Collider directHitCollider = null)
     {
         if (showDebug)
-            Debug.Log($"[AIM-9] Exploding! Hit: {(hitObject != null ? hitObject.name : "nothing")}");
+            Debug.Log($"[AIM-7] Exploding! Hit: {(hitObject != null ? hitObject.name : "nothing")}");
 
         if (explosionEffect != null)
         {
@@ -202,6 +269,7 @@ public class AIM9Missile : MonoBehaviour
         Collider[] objectsInRange = Physics.OverlapSphere(transform.position, explosionRadius);
         foreach (Collider obj in objectsInRange)
         {
+            // Exclude launcher's whole root object
             if (launcher != null && obj.GetComponentInParent<Transform>().root == launcher.transform.root)
                 continue;
 
@@ -210,78 +278,37 @@ public class AIM9Missile : MonoBehaviour
             {
                 float finalDamage = 0f;
 
+                // Direct hit: full damage
                 if (directHitCollider != null && obj == directHitCollider)
                 {
                     finalDamage = damage;
                     if (showDebug)
-                        Debug.Log($"[AIM-9] Direct hit! Full damage {damage} to {obj.name}");
+                        Debug.Log($"[AIM-7] Direct hit! Dealing FULL damage {damage} to {obj.name}");
                 }
                 else
                 {
+                    // Splash damage with falloff
                     Vector3 closest = obj.ClosestPoint(transform.position);
                     float distance = Vector3.Distance(transform.position, closest);
                     float damageFalloff = 1f - (distance / explosionRadius);
                     finalDamage = damage * Mathf.Clamp01(damageFalloff);
                     if (showDebug)
-                        Debug.Log($"[AIM-9] Splash: {finalDamage:F1} to {obj.name}");
+                        Debug.Log($"[AIM-7] Proximity splash: {finalDamage:F1} to {obj.name} (distance: {distance:F1})");
                 }
 
                 if (finalDamage > 0f)
                     damageable.TakeDamage(finalDamage, launcher);
             }
 
+            // Apply explosion force
             Rigidbody targetRb = obj.GetComponent<Rigidbody>();
             if (targetRb != null)
-                targetRb.AddExplosionForce(damage * 50f, transform.position, explosionRadius);
+                targetRb.AddExplosionForce(damage * 65f, transform.position, explosionRadius);
         }
+
         Destroy(gameObject);
     }
 
-    // ==================== PLAYER WARNING SYSTEM ====================
-
-    bool IsTargetingPlayer()
-    {
-        if (target == null) return false;
-
-        // Check if target has Player tag
-        if (target.CompareTag("Player"))
-            return true;
-
-        // Check if target has PlayerHealth component (more reliable)
-        PlayerHealth playerHealth = target.GetComponent<PlayerHealth>();
-        if (playerHealth != null)
-            return true;
-
-        // Check common player object names as fallback
-        string targetName = target.name.ToLower();
-        if (targetName.Contains("player") || targetName.Contains("f16 pivot"))
-            return true;
-
-        return false;
-    }
-
-    void TriggerPlayerMissileWarning()
-    {
-        // Find VoicelineManager in scene
-        VoicelineManager voicelineManager = Object.FindFirstObjectByType<VoicelineManager>();
-
-        if (voicelineManager != null)
-        {
-            voicelineManager.TriggerFlareWarning();
-
-            if (showDebug)
-                Debug.Log("[AIM-9] Triggered player missile warning!");
-        }
-        else
-        {
-            if (showDebug)
-                Debug.LogWarning("[AIM-9] VoicelineManager not found - cannot trigger warning!");
-        }
-    }
-
-    // ==================== PUBLIC API ====================
-
     public void SetTarget(GameObject targetObject) => target = targetObject;
     public void SetLauncher(GameObject launcherObject) => launcher = launcherObject;
-    public bool IsTrackingPlayer() => isTracking && IsTargetingPlayer();
 }

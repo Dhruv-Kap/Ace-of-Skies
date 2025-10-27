@@ -26,6 +26,13 @@ public class F16BotController : MonoBehaviour
     [Range(0f, 1f)] public float skillLevel = 0.7f;
     public float reactionDelay = 0.3f;
 
+    [Header("Bounding Box Corners (Drag & Drop)")]
+    public Transform corner1; // Bottom-left
+    public Transform corner2; // Bottom-right
+    public Transform corner3; // Top-right
+    public Transform corner4; // Top-left
+
+
     [Header("Terrain Avoidance Settings")]
     public float minAltitude = 300f;
     public float terrainCheckDistance = 1500f;
@@ -197,6 +204,9 @@ public class F16BotController : MonoBehaviour
         EnforceMaxSpeed();
         ApplyPitch();
         ApplyRoll();
+
+        EnforceMinimumAltitude();
+        EnforceBoundingBox();
     }
 
     IEnumerator DetectionRoutine()
@@ -740,4 +750,52 @@ public class F16BotController : MonoBehaviour
             Gizmos.DrawLine(transform.position, currentTarget.transform.position);
         }
     }
+
+    void EnforceMinimumAltitude()
+    {
+        if (transform.position.y < 1400f)
+        {
+            Vector3 pos = transform.position;
+            pos.y = 1400f;
+            transform.position = pos;
+
+            // Zero any downward velocity to prevent sinking again
+            Vector3 vel = rb.linearVelocity;
+            if (vel.y < 0f)
+            {
+                vel.y = 0f;
+                rb.linearVelocity = vel;
+            }
+        }
+    }
+
+    void EnforceBoundingBox()
+    {
+        if (corner1 == null || corner2 == null || corner3 == null || corner4 == null)
+            return;
+
+        float minX = Mathf.Min(corner1.position.x, corner2.position.x, corner3.position.x, corner4.position.x);
+        float maxX = Mathf.Max(corner1.position.x, corner2.position.x, corner3.position.x, corner4.position.x);
+
+        float minZ = Mathf.Min(corner1.position.z, corner2.position.z, corner3.position.z, corner4.position.z);
+        float maxZ = Mathf.Max(corner1.position.z, corner2.position.z, corner3.position.z, corner4.position.z);
+
+        float minY = Mathf.Min(corner1.position.y, corner2.position.y, corner3.position.y, corner4.position.y);
+        float maxY = Mathf.Max(corner1.position.y, corner2.position.y, corner3.position.y, corner4.position.y);
+
+        Vector3 pos = transform.position;
+        pos.x = Mathf.Clamp(pos.x, minX, maxX);
+        pos.y = Mathf.Clamp(pos.y, minY, maxY);
+        pos.z = Mathf.Clamp(pos.z, minZ, maxZ);
+        transform.position = pos;
+
+        // Optional: slow velocity when hitting edges
+        Vector3 vel = rb.linearVelocity;
+        if (pos.x <= minX || pos.x >= maxX) vel.x = Mathf.Clamp(vel.x, -10f, 10f);
+        if (pos.y <= minY || pos.y >= maxY) vel.y = Mathf.Clamp(vel.y, -10f, 10f);
+        if (pos.z <= minZ || pos.z >= maxZ) vel.z = Mathf.Clamp(vel.z, -10f, 10f);
+        rb.linearVelocity = vel;
+    }
+
+
 }

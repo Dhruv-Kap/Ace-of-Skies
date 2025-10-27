@@ -1,4 +1,5 @@
 ﻿using UnityEngine;
+using TMPro;
 
 [RequireComponent(typeof(Rigidbody))]
 public class F16Controller : MonoBehaviour
@@ -14,6 +15,23 @@ public class F16Controller : MonoBehaviour
     public float stallSpeedThreshold = 235f;
     public float stallDescentRate = 5f;
     public float maxSpeed = 2125f;
+
+    [Header("UI Settings")]
+    [SerializeField] private TextMeshProUGUI altitudeLabelText; // "Alt" text
+    [SerializeField] private TextMeshProUGUI altitudeValueText; // Altitude value
+    [SerializeField] private TextMeshProUGUI speedLabelText;    // "Spd" text
+    [SerializeField] private TextMeshProUGUI speedValueText;    // Speed value
+
+    [Header("Warning Thresholds")]
+    [SerializeField] private float groundLevelOffset = 1100f; // Subtract this from Y position to get altitude
+    [SerializeField] private float lowAltitudeThreshold = 100f; // Red warning below this altitude
+    [SerializeField] private float lowSpeedWarningThreshold = 250f; // Red warning below this speed
+
+    [Header("UI Colors")]
+    [SerializeField] private Color normalColor = Color.white;
+    [SerializeField] private Color warningColor = Color.red;
+
+
 
     [HideInInspector] public float currentThrottle = 500f;
 
@@ -45,6 +63,12 @@ public class F16Controller : MonoBehaviour
         // Start with some throttle and speed to prevent immediate stall
         currentThrottle = cruiseSpeed * 0.5f;
         rb.linearVelocity = transform.forward * stallSpeedThreshold * 1.2f;
+
+        // Initialize UI labels
+        if (altitudeLabelText != null)
+            altitudeLabelText.text = "Alt";
+        if (speedLabelText != null)
+            speedLabelText.text = "Spd";
     }
 
     void Update()
@@ -52,12 +76,13 @@ public class F16Controller : MonoBehaviour
         HandleThrottle(Time.deltaTime);
         HandlePitchInput();
         HandleRollInput();
+        UpdateUI();
 
         // Print stats every 5s
         if (Time.time - lastPrintTime >= printInterval)
         {
             float forwardSpeed = Vector3.Dot(rb.linearVelocity, transform.forward);
-            float altitude = transform.position.y;
+            float altitude = transform.position.y - groundLevelOffset;
 
             //Debug.Log($"Speed: {forwardSpeed:F1} | Altitude: {altitude:F1} | Throttle: {currentThrottle:F1}");
             lastPrintTime = Time.time;
@@ -73,6 +98,54 @@ public class F16Controller : MonoBehaviour
         ApplyRoll();
     }
 
+    // ----------------------
+    // UI Update
+    // ----------------------
+    void UpdateUI()
+    {
+        float forwardSpeed = Vector3.Dot(rb.linearVelocity, transform.forward);
+        float altitude = transform.position.y - groundLevelOffset;
+
+        // Update altitude value
+        if (altitudeValueText != null)
+        {
+            altitudeValueText.text = $"{altitude:F0}";
+
+            // Change color if below threshold
+            if (altitude < lowAltitudeThreshold)
+            {
+                altitudeValueText.color = warningColor;
+                if (altitudeLabelText != null)
+                    altitudeLabelText.color = warningColor;
+            }
+            else
+            {
+                altitudeValueText.color = normalColor;
+                if (altitudeLabelText != null)
+                    altitudeLabelText.color = normalColor;
+            }
+        }
+
+        // Update speed value
+        if (speedValueText != null)
+        {
+            speedValueText.text = $"{forwardSpeed:F0}";
+
+            // Change color if speed is too low (stalling/falling)
+            if (forwardSpeed < lowSpeedWarningThreshold)
+            {
+                speedValueText.color = warningColor;
+                if (speedLabelText != null)
+                    speedLabelText.color = warningColor;
+            }
+            else
+            {
+                speedValueText.color = normalColor;
+                if (speedLabelText != null)
+                    speedLabelText.color = normalColor;
+            }
+        }
+    }
 
     // ----------------------
     // Throttle Control
@@ -233,5 +306,18 @@ public class F16Controller : MonoBehaviour
             Vector3 targetVelocity = transform.forward * forwardSpeed;
             rb.linearVelocity = Vector3.Lerp(currentVelocity, targetVelocity, Time.fixedDeltaTime * 2f);
         }
+    }
+
+    // ----------------------
+    // Public Getters
+    // ----------------------
+    public float GetCurrentAltitude()
+    {
+        return transform.position.y - groundLevelOffset;
+    }
+
+    public float GetCurrentSpeed()
+    {
+        return Vector3.Dot(rb.linearVelocity, transform.forward);
     }
 }

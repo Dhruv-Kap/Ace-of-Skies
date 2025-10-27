@@ -184,7 +184,7 @@ public class ScoreManager : MonoBehaviour
             TextMeshProUGUI[] victoryTexts = victoryScreen.GetComponentsInChildren<TextMeshProUGUI>();
             if (victoryTexts.Length > 0)
             {
-                victoryTexts[0].text = $"VICTORY!\nYou won with {score} points!\nKills: {GetKillCount(playerName)} | Deaths: {GetDeathCount(playerName)}";
+                victoryTexts[0].text = "VICTORY!";
             }
         }
     }
@@ -199,7 +199,7 @@ public class ScoreManager : MonoBehaviour
             TextMeshProUGUI[] defeatTexts = defeatScreen.GetComponentsInChildren<TextMeshProUGUI>();
             if (defeatTexts.Length > 0)
             {
-                defeatTexts[0].text = $"DEFEAT!\n{winner} won with {score} points\nYour Score: {GetScore(playerName)} | K/D: {GetKillCount(playerName)}/{GetDeathCount(playerName)}";
+                defeatTexts[0].text = "DEFEAT!";
             }
         }
     }
